@@ -67,6 +67,50 @@ async function run() {
       }
     });
 
+    app.put("/api/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const bookData = req.body;
+
+        const result = await newBookCollection.updateOne(
+          {
+            _id: new ObjectId(id),
+          },
+          {
+            $set: {
+              title: bookData.title,
+              genre: bookData.genre,
+              price: bookData.price,
+              coverImage: bookData.coverImage,
+              shortDescription: bookData.shortDescription,
+              content: bookData.content,
+              status: bookData.status,
+            },
+          },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send(error);
+      }
+    });
+
+    app.get("/api/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await newBookCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({
+          message: error.message,
+        });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(

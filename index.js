@@ -1,11 +1,11 @@
 const express = require("express");
-const cors = require('cors');
+const cors = require("cors");
 const app = express();
 const port = 8000;
 require("dotenv").config();
 app.use(cors());
 app.use(express.json());
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 app.get("/", (req, res) => {
   res.send("Hello World!");
@@ -27,19 +27,45 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
+    const database = client.db("ink-sphere");
+    const newBookCollection = database.collection("book");
 
-    const database = client.db('ink-sphere');
-    const newBookCollection = database.collection('book');
+    app.get("/api/books", async (req, res) => {
+      const query = {};
+      if (req.query.writerId) {
+        query.writerId = req.query.writerId;
+      }
+      if (req.query.status) {
+        query.status = req.query.status;
+      }
+      const cursor = newBookCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
 
+    app.post("/api/books", async (req, res) => {
+      const book = req.body;
+      const result = await newBookCollection.insertOne(book);
+      res.send(result);
+    });
 
-    app.post('/book', async (req, res) =>{
-        const book = req.body;
-        const result = await newBookCollection.insertOne(book);
+    // delete api
+    app.delete("/api/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await newBookCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
         res.send(result);
-    })
-
-
-
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });

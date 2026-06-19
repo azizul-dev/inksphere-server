@@ -27,6 +27,7 @@ async function run() {
 
     const database = client.db("ink-sphere");
     const newBookCollection = database.collection("book");
+    const bookmarkCollection = database.collection("bookmark");
 
     app.get("/api/books", async (req, res) => {
       const query = {};
@@ -114,6 +115,83 @@ async function run() {
         res.status(500).send({
           message: error.message,
         });
+      }
+    });
+
+    // Bookmarks
+
+    app.get("/api/bookmarks", async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.userId) {
+          query.userId = req.query.userId;
+        }
+        const cursor = bookmarkCollection.find(query);
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // একটা নির্দিষ্ট বই ইউজার বুকমার্ক করেছে কিনা চেক করা
+    app.get("/api/bookmarks/check", async (req, res) => {
+      try {
+        const { userId, bookId } = req.query;
+        const result = await bookmarkCollection.findOne({ userId, bookId });
+        res.send({ bookmarked: !!result });
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // বুকমার্ক যোগ করা
+    app.post("/api/bookmarks", async (req, res) => {
+      try {
+        const { userId, bookId } = req.body;
+
+        // ডুপ্লিকেট আটকানো
+        const existing = await bookmarkCollection.findOne({ userId, bookId });
+        if (existing) {
+          return res.send({ acknowledged: true, alreadyExists: true });
+        }
+
+        const result = await bookmarkCollection.insertOne({
+          userId,
+          bookId,
+          createdAt: new Date(),
+        });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // বুকমার্ক বাদ দেওয়া
+    app.delete("/api/bookmarks", async (req, res) => {
+      try {
+        const { userId, bookId } = req.query;
+        const result = await bookmarkCollection.deleteOne({ userId, bookId });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // একাধিক bookId দিয়ে বইয়ের ডিটেলস আনা
+    app.post("/api/books/by-ids", async (req, res) => {
+      try {
+        const { ids } = req.body; // ["id1", "id2", ...]
+        if (!Array.isArray(ids) || ids.length === 0) {
+          return res.send([]);
+        }
+
+        const objectIds = ids.map((id) => new ObjectId(id));
+        const cursor = newBookCollection.find({ _id: { $in: objectIds } });
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
       }
     });
 

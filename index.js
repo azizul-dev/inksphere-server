@@ -30,16 +30,66 @@ async function run() {
     const bookmarkCollection = database.collection("bookmark");
 
     app.get("/api/books", async (req, res) => {
-      const query = {};
-      if (req.query.writerId) {
-        query.writerId = req.query.writerId;
+      try {
+        const {
+          writerId,
+          status,
+          search,
+          genre,
+          minPrice,
+          maxPrice,
+          sort,
+          page = 1,
+          limit = 12,
+        } = req.query;
+
+        const query = {};
+
+        if (writerId) query.writerId = writerId;
+        if (status) query.status = status;
+        if (genre) query.genre = genre;
+
+        if (search) {
+          query.$or = [
+            { title: { $regex: search, $options: "i" } },
+            { writerName: { $regex: search, $options: "i" } },
+          ];
+        }
+
+        if (minPrice || maxPrice) {
+          query.price = {};
+          if (minPrice) query.price.$gte = Number(minPrice);
+          if (maxPrice) query.price.$lte = Number(maxPrice);
+        }
+
+        let sortOption = { _id: -1 };
+        if (sort === "price-asc") sortOption = { price: 1 };
+        if (sort === "price-desc") sortOption = { price: -1 };
+        if (sort === "newest") sortOption = { _id: -1 };
+
+        const pageNum = Number(page);
+        const limitNum = Number(limit);
+        const skip = (pageNum - 1) * limitNum;
+
+        const totalCount = await newBookCollection.countDocuments(query);
+
+        const cursor = newBookCollection
+          .find(query)
+          .sort(sortOption)
+          .skip(skip)
+          .limit(limitNum);
+
+        const result = await cursor.toArray();
+
+        res.send({
+          books: result,
+          totalCount,
+          totalPages: Math.ceil(totalCount / limitNum),
+          currentPage: pageNum,
+        });
+      } catch (error) {
+        res.status(500).send({ message: error.message });
       }
-      if (req.query.status) {
-        query.status = req.query.status;
-      }
-      const cursor = newBookCollection.find(query);
-      const result = await cursor.toArray();
-      res.send(result);
     });
 
     app.post("/api/books", async (req, res) => {

@@ -28,6 +28,7 @@ async function run() {
     const database = client.db("ink-sphere");
     const newBookCollection = database.collection("book");
     const bookmarkCollection = database.collection("bookmark");
+    const purchaseCollection = database.collection("purchase");
 
     app.get("/api/books", async (req, res) => {
       try {
@@ -239,6 +240,181 @@ async function run() {
         const objectIds = ids.map((id) => new ObjectId(id));
         const cursor = newBookCollection.find({ _id: { $in: objectIds } });
         const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // purchase
+    // ---------- Purchases ----------
+
+    app.post("/api/purchases", async (req, res) => {
+      try {
+        const { userId, bookId, writerId, price, transactionId } = req.body;
+
+        const existing = await purchaseCollection.findOne({ userId, bookId });
+        if (existing) {
+          return res.send({ acknowledged: true, alreadyExists: true });
+        }
+
+        const result = await purchaseCollection.insertOne({
+          userId,
+          bookId,
+          writerId,
+          price,
+          transactionId,
+          purchaseDate: new Date(),
+        });
+
+        await newBookCollection.updateOne(
+          { _id: new ObjectId(bookId) },
+          { $set: { status: "sold" } },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/purchases", async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.userId) query.userId = req.query.userId;
+        const result = await purchaseCollection
+          .find(query)
+          .sort({ purchaseDate: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/purchases/check", async (req, res) => {
+      try {
+        const { userId, bookId } = req.query;
+        const result = await purchaseCollection.findOne({ userId, bookId });
+        res.send({ purchased: !!result });
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/purchases/sales", async (req, res) => {
+      try {
+        const { writerId } = req.query;
+        const result = await purchaseCollection
+          .find({ writerId })
+          .sort({ purchaseDate: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // ইউজারের সব purchase হিস্টোরি আনা
+    app.get("/api/purchases", async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.userId) query.userId = req.query.userId;
+        const result = await purchaseCollection
+          .find(query)
+          .sort({ purchaseDate: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // Already Purchased চেক
+    app.get("/api/purchases/check", async (req, res) => {
+      try {
+        const { userId, bookId } = req.query;
+        const result = await purchaseCollection.findOne({ userId, bookId });
+        res.send({ purchased: !!result });
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // Writer এর sales history
+    app.get("/api/purchases/sales", async (req, res) => {
+      try {
+        const { writerId } = req.query;
+        const result = await purchaseCollection
+          .find({ writerId })
+          .sort({ purchaseDate: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/purchases", async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.userId) query.userId = req.query.userId;
+        const result = await purchaseCollection
+          .find(query)
+          .sort({ purchaseDate: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/purchases/check", async (req, res) => {
+      try {
+        const { userId, bookId } = req.query;
+        const result = await purchaseCollection.findOne({ userId, bookId });
+        res.send({ purchased: !!result });
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // নির্দিষ্ট ইউজারের সব purchase হিস্টোরি আনা
+    app.get("/api/purchases", async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.userId) query.userId = req.query.userId;
+
+        const cursor = purchaseCollection
+          .find(query)
+          .sort({ purchaseDate: -1 });
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // একটা বই ইউজার কিনেছে কিনা চেক করা (Already Purchased বাটনের জন্য)
+    app.get("/api/purchases/check", async (req, res) => {
+      try {
+        const { userId, bookId } = req.query;
+        const result = await purchaseCollection.findOne({ userId, bookId });
+        res.send({ purchased: !!result });
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // sells
+    // ব্যাকএন্ডে নতুন route
+    app.get("/api/purchases/sales", async (req, res) => {
+      try {
+        const { writerId } = req.query;
+        const result = await purchaseCollection
+          .find({ writerId })
+          .sort({ purchaseDate: -1 })
+          .toArray();
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: error.message });

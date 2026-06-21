@@ -29,9 +29,10 @@ async function run() {
     const newBookCollection = database.collection("book");
     const bookmarkCollection = database.collection("bookmark");
     const purchaseCollection = database.collection("purchase");
-   const userCollection = database.collection("user");
+    const userCollection = database.collection("user");
+    const publishingFeeCollection = database.collection("publishingFee");
 
-//  Users 
+    //  Users
     // সব ইউজার আনা (admin দের জন্য)
     app.get("/api/users", async (req, res) => {
       try {
@@ -487,6 +488,68 @@ async function run() {
           .find({ writerId })
           .sort({ purchaseDate: -1 })
           .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // ---------- Publishing Fee (Writer verification payment) ----------
+
+    app.post("/api/publishing-fee", async (req, res) => {
+      try {
+        const { userId, email, amount, transactionId } = req.body;
+
+        const existing = await publishingFeeCollection.findOne({ userId });
+        if (existing) {
+          return res.send({ acknowledged: true, alreadyExists: true });
+        }
+
+        const result = await publishingFeeCollection.insertOne({
+          userId,
+          email,
+          amount,
+          transactionId,
+          paidAt: new Date(),
+        });
+
+        await userCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { role: "writer" } },
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/publishing-fee", async (req, res) => {
+      try {
+        const result = await publishingFeeCollection
+          .find()
+          .sort({ paidAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/publishing-fee/check", async (req, res) => {
+      try {
+        const { userId } = req.query;
+        const result = await publishingFeeCollection.findOne({ userId });
+        res.send({ paid: !!result });
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+    // ID দিয়ে ইউজার খোঁজা
+    app.get("/api/users/by-id/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await userCollection.findOne({ _id: new ObjectId(id) });
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: error.message });

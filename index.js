@@ -29,6 +29,78 @@ async function run() {
     const newBookCollection = database.collection("book");
     const bookmarkCollection = database.collection("bookmark");
     const purchaseCollection = database.collection("purchase");
+   const userCollection = database.collection("user");
+
+//  Users 
+    // সব ইউজার আনা (admin দের জন্য)
+    app.get("/api/users", async (req, res) => {
+      try {
+        const result = await userCollection.find().sort({ _id: -1 }).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // নতুন ইউজার সেভ করা (registration এর সময়)
+    app.post("/api/users", async (req, res) => {
+      try {
+        const userData = req.body;
+        const existing = await userCollection.findOne({
+          email: userData.email,
+        });
+        if (existing) {
+          return res.send({ acknowledged: true, alreadyExists: true });
+        }
+        const result = await userCollection.insertOne({
+          ...userData,
+          role: userData.role || "user",
+          createdAt: new Date(),
+        });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // একজন ইউজারের ইনফো আনা (email দিয়ে)
+    app.get("/api/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await userCollection.findOne({ email });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // রোল পরিবর্তন করা (admin action)
+    app.patch("/api/users/role/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { role } = req.body;
+        const result = await userCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role } },
+        );
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // ইউজার ডিলিট করা (admin action)
+    app.delete("/api/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await userCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
 
     app.get("/api/books", async (req, res) => {
       try {

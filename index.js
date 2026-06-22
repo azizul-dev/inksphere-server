@@ -16,20 +16,6 @@ const logger = (req, res, next) => {
   next();
 };
 
-const verifyToken = (req, res, next) => {
-  console.log("headers", req.headers);
-  const authHeader = req.headers?.authorization;
-  if (!authHeader) {
-    return res.status(401).send({ message: "unauthorized access" });
-  }
-  const token = authHeader.split(" ")[1];
-
-  if (!token) {
-    return res.status(401).send({ message: "unauthorized access" });
-  }
-  next();
-};
-
 const uri = process.env.MONGODB_URI;
 
 const client = new MongoClient(uri, {
@@ -50,10 +36,55 @@ async function run() {
     const purchaseCollection = database.collection("purchase");
     const userCollection = database.collection("user");
     const publishingFeeCollection = database.collection("publishingFee");
+    const sessionCollection = database.collection("session");
+
+    const verifyToken = async (req, res, next) => {
+      const authHeader = req.headers?.authorization;
+      if (!authHeader) {
+        return res.status(401).send({ message: "unauthorized access" });
+      }
+      const token = authHeader.split(" ")[1];
+
+      if (!token) {
+        return res.status(401).send({ message: "unauthorized access" });
+      }
+
+      const query = { token: token };
+      const session = await sessionCollection.findOne(query);
+
+      const userId = session.userId;
+
+      const userQuery = {
+        _id: userId,
+      };
+
+      const user = await userCollection.findOne(userQuery);
+      req.user = user;
+      next();
+    };
+
+    const verifyAdmin = async (req, res, next) => {
+      if (req.user?.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+    const verifyWriter = async (req, res, next) => {
+      if (req.user?.role !== "writer") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
+    const verifyReader = async (req, res, next) => {
+      if (req.user?.role !== "reader") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
 
     //  Users
     // সব ইউজার আনা (admin দের জন্য)
-    app.get("/api/users", async (req, res) => {
+    app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const result = await userCollection.find().sort({ _id: -1 }).toArray();
         res.send(result);

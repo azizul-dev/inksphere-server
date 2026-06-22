@@ -12,7 +12,7 @@ app.get("/", (req, res) => {
 });
 
 const logger = (req, res, next) => {
-  console.log("logger logged", req.params);
+  console.log(`[${req.method}] ${req.path}`, req.params);
   next();
 };
 
@@ -38,52 +38,82 @@ async function run() {
     const publishingFeeCollection = database.collection("publishingFee");
     const sessionCollection = database.collection("session");
 
+    // ─── Middlewares ───────────────────────────────────────────
+
     const verifyToken = async (req, res, next) => {
       const authHeader = req.headers?.authorization;
       if (!authHeader) {
         return res.status(401).send({ message: "unauthorized access" });
       }
       const token = authHeader.split(" ")[1];
-
       if (!token) {
         return res.status(401).send({ message: "unauthorized access" });
       }
-
-      const query = { token: token };
-      const session = await sessionCollection.findOne(query);
-
-      const userId = session.userId;
-
-      const userQuery = {
-        _id: userId,
-      };
-
-      const user = await userCollection.findOne(userQuery);
+      const session = await sessionCollection.findOne({ token });
+      if (!session) {
+        return res.status(401).send({ message: "unauthorized access" });
+      }
+      const user = await userCollection.findOne({ _id: session.userId });
+      if (!user) {
+        return res.status(401).send({ message: "unauthorized access" });
+      }
       req.user = user;
       next();
     };
 
-    const verifyAdmin = async (req, res, next) => {
+    const verifyAdmin = (req, res, next) => {
       if (req.user?.role !== "admin") {
         return res.status(403).send({ message: "forbidden access" });
       }
       next();
     };
-    const verifyWriter = async (req, res, next) => {
+
+    const verifyWriter = (req, res, next) => {
       if (req.user?.role !== "writer") {
         return res.status(403).send({ message: "forbidden access" });
       }
       next();
     };
-    const verifyReader = async (req, res, next) => {
-      if (req.user?.role !== "reader") {
+
+    const verifyAdminOrWriter = (req, res, next) => {
+      const role = req.user?.role;
+      if (role !== "admin" && role !== "writer") {
         return res.status(403).send({ message: "forbidden access" });
       }
       next();
     };
 
-    //  Users
-    // সব ইউজার আনা (admin দের জন্য)
+    // ─── Users ────────────────────────────────────────────────
+
+    // নতুন ইউজার সেভ করা (public)
+    app.post("/api/users", async (req, res) => {
+      try {
+        const userData = req.body;
+        const existing = await userCollection.findOne({
+          email: userData.email,
+        });
+        if (existing) {
+          if (userData.role) {
+            await userCollection.updateOne(
+              { email: userData.email },
+              { $set: { role: userData.role } }
+            );
+          }
+          return res.send({ acknowledged: true, alreadyExists: true });
+        }
+        // POST /api/users এ
+        const result = await userCollection.insertOne({
+          ...userData,
+          role: userData.role || "reader", // "user" এর বদলে "reader"
+          createdAt: new Date(),
+        });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // সব ইউজার আনা (admin only)
     app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const result = await userCollection.find().sort({ _id: -1 }).toArray();
@@ -93,57 +123,48 @@ async function run() {
       }
     });
 
-    // নতুন ইউজার সেভ করা
-    app.post("/api/users", async (req, res) => {
-      try {
-        const userData = req.body;
-        const existing = await userCollection.findOne({
-          email: userData.email,
-        });
-        if (existing) {
-          return res.send({ acknowledged: true, alreadyExists: true });
+    // role change (admin only)
+    app.patch(
+      "/api/users/role/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const { role } = req.body;
+          const result = await userCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { role } },
+          );
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
         }
-        const result = await userCollection.insertOne({
-          ...userData,
-          role: userData.role || "user",
-          createdAt: new Date(),
-        });
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
+      },
+    );
 
-    // ✅ SPECIFIC routes — :email এর আগে রাখতে হবে
-    app.patch("/api/users/role/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { role } = req.body;
-        const result = await userCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { role } },
-        );
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
+    // ban/unban (admin only)
+    app.patch(
+      "/api/users/:id/ban",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const { banned } = req.body;
+          const result = await userCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { banned } },
+          );
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
+        }
+      },
+    );
 
-    app.patch("/api/users/:id/ban", verifyToken, logger, async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { banned } = req.body;
-        const result = await userCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { banned: banned } },
-        );
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    app.delete("/api/users/:id", async (req, res) => {
+    // user delete (admin only)
+    app.delete("/api/users/:id", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const id = req.params.id;
         const result = await userCollection.deleteOne({
@@ -155,17 +176,25 @@ async function run() {
       }
     });
 
-    app.get("/api/users/by-id/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const result = await userCollection.findOne({ _id: new ObjectId(id) });
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
+    // ID দিয়ে ইউজার আনা (admin only)
+    app.get(
+      "/api/users/by-id/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const result = await userCollection.findOne({
+            _id: new ObjectId(id),
+          });
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
+        }
+      },
+    );
 
-    // ⚠️ GENERIC :email route — সবার শেষে রাখতে হবে
+    // email দিয়ে ইউজার আনা (public — login এর সময় দরকার)
     app.get("/api/users/:email", async (req, res) => {
       try {
         const email = req.params.email;
@@ -176,7 +205,10 @@ async function run() {
       }
     });
 
-    app.get("/api/books", verifyToken, logger, async (req, res) => {
+    // ─── Books ────────────────────────────────────────────────
+
+    // সব বই আনা (public)
+    app.get("/api/books", async (req, res) => {
       try {
         const {
           writerId,
@@ -191,7 +223,6 @@ async function run() {
         } = req.query;
 
         const query = {};
-
         if (writerId) query.writerId = writerId;
         if (status) query.status = status;
         if (genre) query.genre = genre;
@@ -217,16 +248,14 @@ async function run() {
         const pageNum = Number(page);
         const limitNum = Number(limit);
         const skip = (pageNum - 1) * limitNum;
-
         const totalCount = await newBookCollection.countDocuments(query);
 
-        const cursor = newBookCollection
+        const result = await newBookCollection
           .find(query)
           .sort(sortOption)
           .skip(skip)
-          .limit(limitNum);
-
-        const result = await cursor.toArray();
+          .limit(limitNum)
+          .toArray();
 
         res.send({
           books: result,
@@ -239,100 +268,126 @@ async function run() {
       }
     });
 
-    app.post("/api/books", async (req, res) => {
-      const book = req.body;
-      const result = await newBookCollection.insertOne(book);
-      res.send(result);
-    });
-
-    app.delete("/api/books/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-
-        const result = await newBookCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
-
-    app.put("/api/books/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const bookData = req.body;
-
-        const allowedFields = [
-          "title",
-          "genre",
-          "price",
-          "coverImage",
-          "shortDescription",
-          "content",
-          "status",
-        ];
-
-        const updateFields = {};
-        allowedFields.forEach((field) => {
-          if (bookData[field] !== undefined) {
-            updateFields[field] = bookData[field];
-          }
-        });
-
-        const result = await newBookCollection.updateOne(
-          {
-            _id: new ObjectId(id),
-          },
-          {
-            $set: updateFields,
-          },
-        );
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send(error);
-      }
-    });
-
+    // একটা বই আনা (public)
     app.get("/api/books/:id", async (req, res) => {
       try {
         const id = req.params.id;
-
         const result = await newBookCollection.findOne({
           _id: new ObjectId(id),
         });
-
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({
-          message: error.message,
-        });
-      }
-    });
-
-    // Bookmarks
-
-    app.get("/api/bookmarks", async (req, res) => {
-      try {
-        const query = {};
-        if (req.query.userId) {
-          query.userId = req.query.userId;
-        }
-        const cursor = bookmarkCollection.find(query);
-        const result = await cursor.toArray();
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: error.message });
       }
     });
 
-    // একটা নির্দিষ্ট বই ইউজার বুকমার্ক করেছে কিনা চেক করা
-    app.get("/api/bookmarks/check", async (req, res) => {
+    // multiple id দিয়ে বই আনা (public)
+    app.post("/api/books/by-ids", async (req, res) => {
+      try {
+        const { ids } = req.body;
+        if (!Array.isArray(ids) || ids.length === 0) return res.send([]);
+        const objectIds = ids.map((id) => new ObjectId(id));
+        const result = await newBookCollection
+          .find({ _id: { $in: objectIds } })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // নতুন বই create (writer only)
+    app.post("/api/books", verifyToken, verifyWriter, async (req, res) => {
+      try {
+        const book = req.body;
+        const result = await newBookCollection.insertOne(book);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // বই edit (writer নিজেরটা, admin সবটা)
+    app.put(
+      "/api/books/:id",
+      verifyToken,
+      verifyAdminOrWriter,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const bookData = req.body;
+
+          // writer হলে শুধু নিজের বই edit করতে পারবে
+          if (req.user.role === "writer") {
+            const book = await newBookCollection.findOne({
+              _id: new ObjectId(id),
+            });
+            if (!book || book.writerId !== req.user._id.toString()) {
+              return res.status(403).send({ message: "forbidden access" });
+            }
+          }
+
+          const allowedFields = [
+            "title",
+            "genre",
+            "price",
+            "coverImage",
+            "shortDescription",
+            "content",
+            "status",
+          ];
+
+          const updateFields = {};
+          allowedFields.forEach((field) => {
+            if (bookData[field] !== undefined) {
+              updateFields[field] = bookData[field];
+            }
+          });
+
+          const result = await newBookCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updateFields },
+          );
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
+        }
+      },
+    );
+
+    // বই delete (writer নিজেরটা, admin সবটা)
+    app.delete(
+      "/api/books/:id",
+      verifyToken,
+      verifyAdminOrWriter,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+
+          // writer হলে শুধু নিজের বই delete করতে পারবে
+          if (req.user.role === "writer") {
+            const book = await newBookCollection.findOne({
+              _id: new ObjectId(id),
+            });
+            if (!book || book.writerId !== req.user._id.toString()) {
+              return res.status(403).send({ message: "forbidden access" });
+            }
+          }
+
+          const result = await newBookCollection.deleteOne({
+            _id: new ObjectId(id),
+          });
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
+        }
+      },
+    );
+
+    // ─── Bookmarks ────────────────────────────────────────────
+
+    // bookmark check (logged in)
+    app.get("/api/bookmarks/check", verifyToken, async (req, res) => {
       try {
         const { userId, bookId } = req.query;
         const result = await bookmarkCollection.findOne({ userId, bookId });
@@ -342,17 +397,26 @@ async function run() {
       }
     });
 
-    // বুকমার্ক যোগ করা
-    app.post("/api/bookmarks", async (req, res) => {
+    // সব bookmarks আনা (logged in)
+    app.get("/api/bookmarks", verifyToken, async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.userId) query.userId = req.query.userId;
+        const result = await bookmarkCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // bookmark add (logged in)
+    app.post("/api/bookmarks", verifyToken, async (req, res) => {
       try {
         const { userId, bookId } = req.body;
-
-        // ডুপ্লিকেট আটকানো
         const existing = await bookmarkCollection.findOne({ userId, bookId });
         if (existing) {
           return res.send({ acknowledged: true, alreadyExists: true });
         }
-
         const result = await bookmarkCollection.insertOne({
           userId,
           bookId,
@@ -364,8 +428,8 @@ async function run() {
       }
     });
 
-    // বুকমার্ক বাদ দেওয়া
-    app.delete("/api/bookmarks", async (req, res) => {
+    // bookmark remove (logged in)
+    app.delete("/api/bookmarks", verifyToken, async (req, res) => {
       try {
         const { userId, bookId } = req.query;
         const result = await bookmarkCollection.deleteOne({ userId, bookId });
@@ -375,29 +439,53 @@ async function run() {
       }
     });
 
-    // একাধিক bookId দিয়ে বইয়ের ডিটেলস আনা
-    app.post("/api/books/by-ids", async (req, res) => {
-      try {
-        const { ids } = req.body; // ["id1", "id2", ...]
-        if (!Array.isArray(ids) || ids.length === 0) {
-          return res.send([]);
-        }
+    // ─── Purchases ────────────────────────────────────────────
 
-        const objectIds = ids.map((id) => new ObjectId(id));
-        const cursor = newBookCollection.find({ _id: { $in: objectIds } });
-        const result = await cursor.toArray();
-        res.send(result);
+    // purchase check (logged in)
+    app.get("/api/purchases/check", verifyToken, async (req, res) => {
+      try {
+        const { userId, bookId } = req.query;
+        const result = await purchaseCollection.findOne({ userId, bookId });
+        res.send({ purchased: !!result });
       } catch (error) {
         res.status(500).send({ message: error.message });
       }
     });
 
-    // purchase
-    // ---------- Purchases ----------
+    // writer এর sales history (writer only)
+    app.get(
+      "/api/purchases/sales",
+      verifyToken,
+      verifyWriter,
+      async (req, res) => {
+        try {
+          const { writerId } = req.query;
+          const result = await purchaseCollection
+            .find({ writerId })
+            .sort({ purchaseDate: -1 })
+            .toArray();
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
+        }
+      },
+    );
 
-    app.post("/api/purchases", async (req, res) => {
+    // নতুন purchase (logged in)
+    // নতুন purchase (logged in)
+    app.post("/api/purchases", verifyToken, async (req, res) => {
       try {
         const { userId, bookId, writerId, price, transactionId } = req.body;
+
+        // writer নিজের বই কিনতে পারবে না
+        const book = await newBookCollection.findOne({
+          _id: new ObjectId(bookId),
+        });
+        if (book && book.writerId === req.user._id.toString()) {
+          return res
+            .status(403)
+            .send({ message: "Writer cannot buy own book" });
+        }
 
         const existing = await purchaseCollection.findOne({ userId, bookId });
         if (existing) {
@@ -424,10 +512,13 @@ async function run() {
       }
     });
 
-    app.get("/api/purchases", async (req, res) => {
+    // সব purchases আনা (admin = সব, user = নিজেরটা)
+    app.get("/api/purchases", verifyToken, async (req, res) => {
       try {
         const query = {};
-        if (req.query.userId) query.userId = req.query.userId;
+        if (req.user.role !== "admin") {
+          query.userId = req.query.userId;
+        }
         const result = await purchaseCollection
           .find(query)
           .sort({ purchaseDate: -1 })
@@ -438,146 +529,45 @@ async function run() {
       }
     });
 
-    app.get("/api/purchases/check", async (req, res) => {
+    // ─── Publishing Fee ───────────────────────────────────────
+
+    // fee paid check (logged in)
+    app.get("/api/publishing-fee/check", verifyToken, async (req, res) => {
       try {
-        const { userId, bookId } = req.query;
-        const result = await purchaseCollection.findOne({ userId, bookId });
-        res.send({ purchased: !!result });
+        const { userId } = req.query;
+        const result = await publishingFeeCollection.findOne({ userId });
+        res.send({ paid: !!result });
       } catch (error) {
         res.status(500).send({ message: error.message });
       }
     });
 
-    app.get("/api/purchases/sales", async (req, res) => {
-      try {
-        const { writerId } = req.query;
-        const result = await purchaseCollection
-          .find({ writerId })
-          .sort({ purchaseDate: -1 })
-          .toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
+    // সব publishing fees (admin only)
+    app.get(
+      "/api/publishing-fee",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await publishingFeeCollection
+            .find()
+            .sort({ paidAt: -1 })
+            .toArray();
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: error.message });
+        }
+      },
+    );
 
-    // ইউজারের সব purchase হিস্টোরি আনা
-    app.get("/api/purchases", async (req, res) => {
-      try {
-        const query = {};
-        if (req.query.userId) query.userId = req.query.userId;
-        const result = await purchaseCollection
-          .find(query)
-          .sort({ purchaseDate: -1 })
-          .toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    // Already Purchased চেক
-    app.get("/api/purchases/check", async (req, res) => {
-      try {
-        const { userId, bookId } = req.query;
-        const result = await purchaseCollection.findOne({ userId, bookId });
-        res.send({ purchased: !!result });
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    // Writer এর sales history
-    app.get("/api/purchases/sales", async (req, res) => {
-      try {
-        const { writerId } = req.query;
-        const result = await purchaseCollection
-          .find({ writerId })
-          .sort({ purchaseDate: -1 })
-          .toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    app.get("/api/purchases", async (req, res) => {
-      try {
-        const query = {};
-        if (req.query.userId) query.userId = req.query.userId;
-        const result = await purchaseCollection
-          .find(query)
-          .sort({ purchaseDate: -1 })
-          .toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    app.get("/api/purchases/check", async (req, res) => {
-      try {
-        const { userId, bookId } = req.query;
-        const result = await purchaseCollection.findOne({ userId, bookId });
-        res.send({ purchased: !!result });
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    // নির্দিষ্ট ইউজারের সব purchase হিস্টোরি আনা
-    app.get("/api/purchases", async (req, res) => {
-      try {
-        const query = {};
-        if (req.query.userId) query.userId = req.query.userId;
-
-        const cursor = purchaseCollection
-          .find(query)
-          .sort({ purchaseDate: -1 });
-        const result = await cursor.toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    // একটা বই ইউজার কিনেছে কিনা চেক করা (Already Purchased বাটনের জন্য)
-    app.get("/api/purchases/check", async (req, res) => {
-      try {
-        const { userId, bookId } = req.query;
-        const result = await purchaseCollection.findOne({ userId, bookId });
-        res.send({ purchased: !!result });
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    // sells
-    // ব্যাকএন্ডে নতুন route
-    app.get("/api/purchases/sales", async (req, res) => {
-      try {
-        const { writerId } = req.query;
-        const result = await purchaseCollection
-          .find({ writerId })
-          .sort({ purchaseDate: -1 })
-          .toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    // ---------- Publishing Fee (Writer verification payment) ----------
-
-    app.post("/api/publishing-fee", async (req, res) => {
+    // publishing fee payment (logged in)
+    app.post("/api/publishing-fee", verifyToken, async (req, res) => {
       try {
         const { userId, email, amount, transactionId } = req.body;
-
         const existing = await publishingFeeCollection.findOne({ userId });
         if (existing) {
           return res.send({ acknowledged: true, alreadyExists: true });
         }
-
         const result = await publishingFeeCollection.insertOne({
           userId,
           email,
@@ -585,35 +575,11 @@ async function run() {
           transactionId,
           paidAt: new Date(),
         });
-
         await userCollection.updateOne(
           { _id: new ObjectId(userId) },
           { $set: { role: "writer" } },
         );
-
         res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    app.get("/api/publishing-fee", async (req, res) => {
-      try {
-        const result = await publishingFeeCollection
-          .find()
-          .sort({ paidAt: -1 })
-          .toArray();
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    app.get("/api/publishing-fee/check", async (req, res) => {
-      try {
-        const { userId } = req.query;
-        const result = await publishingFeeCollection.findOne({ userId });
-        res.send({ paid: !!result });
       } catch (error) {
         res.status(500).send({ message: error.message });
       }
@@ -627,6 +593,7 @@ async function run() {
     // await client.close();
   }
 }
+
 run().catch(console.dir);
 
 app.listen(port, () => {

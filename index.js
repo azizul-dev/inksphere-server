@@ -34,6 +34,7 @@ async function run() {
 
     //  Users
     // সব ইউজার আনা (admin দের জন্য)
+    // সব ইউজার আনা
     app.get("/api/users", async (req, res) => {
       try {
         const result = await userCollection.find().sort({ _id: -1 }).toArray();
@@ -43,7 +44,7 @@ async function run() {
       }
     });
 
-    // নতুন ইউজার সেভ করা (registration এর সময়)
+    // নতুন ইউজার সেভ করা
     app.post("/api/users", async (req, res) => {
       try {
         const userData = req.body;
@@ -64,18 +65,7 @@ async function run() {
       }
     });
 
-    // একজন ইউজারের ইনফো আনা (email দিয়ে)
-    app.get("/api/users/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const result = await userCollection.findOne({ email });
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
-    // রোল পরিবর্তন করা (admin action)
+    // ✅ SPECIFIC routes — :email এর আগে রাখতে হবে
     app.patch("/api/users/role/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -90,13 +80,47 @@ async function run() {
       }
     });
 
-    // ইউজার ডিলিট করা (admin action)
+    app.patch("/api/users/:id/ban", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { banned } = req.body;
+        const result = await userCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { banned: banned } },
+        );
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
     app.delete("/api/users/:id", async (req, res) => {
       try {
         const id = req.params.id;
         const result = await userCollection.deleteOne({
           _id: new ObjectId(id),
         });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    app.get("/api/users/by-id/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await userCollection.findOne({ _id: new ObjectId(id) });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // ⚠️ GENERIC :email route — সবার শেষে রাখতে হবে
+    app.get("/api/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await userCollection.findOne({ email });
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: error.message });
@@ -545,17 +569,7 @@ async function run() {
         res.status(500).send({ message: error.message });
       }
     });
-    // ID দিয়ে ইউজার খোঁজা
-    app.get("/api/users/by-id/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const result = await userCollection.findOne({ _id: new ObjectId(id) });
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: error.message });
-      }
-    });
-
+ 
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",

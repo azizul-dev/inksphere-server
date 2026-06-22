@@ -11,6 +11,25 @@ app.get("/", (req, res) => {
   res.send("Hello World!");
 });
 
+const logger = (req, res, next) => {
+  console.log("logger logged", req.params);
+  next();
+};
+
+const verifyToken = (req, res, next) => {
+  console.log("headers", req.headers);
+  const authHeader = req.headers?.authorization;
+  if (!authHeader) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  next();
+};
+
 const uri = process.env.MONGODB_URI;
 
 const client = new MongoClient(uri, {
@@ -34,7 +53,6 @@ async function run() {
 
     //  Users
     // সব ইউজার আনা (admin দের জন্য)
-    // সব ইউজার আনা
     app.get("/api/users", async (req, res) => {
       try {
         const result = await userCollection.find().sort({ _id: -1 }).toArray();
@@ -80,7 +98,7 @@ async function run() {
       }
     });
 
-    app.patch("/api/users/:id/ban", async (req, res) => {
+    app.patch("/api/users/:id/ban", verifyToken, logger, async (req, res) => {
       try {
         const id = req.params.id;
         const { banned } = req.body;
@@ -127,7 +145,7 @@ async function run() {
       }
     });
 
-    app.get("/api/books", async (req, res) => {
+    app.get("/api/books", verifyToken, logger, async (req, res) => {
       try {
         const {
           writerId,
@@ -569,7 +587,7 @@ async function run() {
         res.status(500).send({ message: error.message });
       }
     });
- 
+
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!",

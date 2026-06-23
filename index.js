@@ -26,13 +26,13 @@ const client = new MongoClient(uri, {
   },
 });
 
-// async function run() {
-//   try {
-//     await client.connect();
+async function run() {
+  try {
+    await client.connect();
 
-client.connect(() =>{
-  console.log('connection to Mongodb')
-}).catch(console.dir)
+    // client.connect(() =>{
+    //   console.log('connection to Mongodb')
+    // }).catch(console.dir)
 
     const database = client.db("ink-sphere");
     const newBookCollection = database.collection("book");
@@ -100,7 +100,7 @@ client.connect(() =>{
           if (userData.role) {
             await userCollection.updateOne(
               { email: userData.email },
-              { $set: { role: userData.role } }
+              { $set: { role: userData.role } },
             );
           }
           return res.send({ acknowledged: true, alreadyExists: true });
@@ -589,19 +589,49 @@ client.connect(() =>{
       }
     });
 
-    // await client.db("admin").command({ ping: 1 });
-//     console.log(
-//       "Pinged your deployment. You successfully connected to MongoDB!",
-//     );
-// //   } finally {
-// //     // await client.close();
-// //   }
-// // }
+    // Top Writers — purchase count অনুযায়ী (public)
+    app.get("/api/writers/top", async (req, res) => {
+      try {
+        const topWriters = await purchaseCollection
+          .aggregate([
+            { $group: { _id: "$writerId", totalSales: { $sum: 1 } } },
+            { $sort: { totalSales: -1 } },
+            { $limit: 3 },
+          ])
+          .toArray();
 
-// // run().catch(console.dir);
+        const writerIds = topWriters.map((w) => new ObjectId(w._id));
+        const writers = await userCollection
+          .find({ _id: { $in: writerIds } })
+          .toArray();
+
+        const result = topWriters.map((w) => {
+          const writer = writers.find((u) => u._id.toString() === w._id);
+          return {
+            ...writer,
+            totalSales: w.totalSales,
+          };
+        });
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: error.message });
+      }
+    });
+
+    // await client.db("admin").command({ ping: 1 });
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!",
+    );
+  } finally {
+    // await client.close();
+  }
+}
+
+run().catch(console.dir);
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
 
-module.exports = app;
+// module.exports = app;

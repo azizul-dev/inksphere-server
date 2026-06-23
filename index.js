@@ -26,13 +26,13 @@ const client = new MongoClient(uri, {
   },
 });
 
-async function run() {
-  try {
-    await client.connect();
+// async function run() {
+//   try {
+//     await client.connect();
 
-    // client.connect(() =>{
-    //   console.log('connection to Mongodb')
-    // }).catch(console.dir)
+    client.connect(() =>{
+      console.log('connection to Mongodb')
+    }).catch(console.dir)
 
     const database = client.db("ink-sphere");
     const newBookCollection = database.collection("book");
@@ -620,18 +620,18 @@ async function run() {
     });
 
     // await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
-  } finally {
-    // await client.close();
-  }
-}
+//     console.log(
+//       "Pinged your deployment. You successfully connected to MongoDB!",
+//     );
+//   } finally {
+//     // await client.close();
+//   }
+// }
 
-run().catch(console.dir);
+// run().catch(console.dir);
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
+// app.listen(port, () => {
+//   console.log(`Example app listening on port ${port}`);
+// });
 
-// module.exports = app;
+module.exports = app;
